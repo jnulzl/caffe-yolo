@@ -38,15 +38,15 @@ void DetectionLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   LossLayer<Dtype>::LayerSetUp(bottom, top);
   DetectionLossParameter param = this->layer_param_.detection_loss_param();
-  side_ = param.side();
-  num_class_ = param.num_class();
-  num_object_ = param.num_object();
+  side_ = param.side();  // S=7
+  num_class_ = param.num_class(); // N = 20
+  num_object_ = param.num_object();  // B = 2
   sqrt_ = param.sqrt();
   constriant_ = param.constriant();
-  object_scale_ = param.object_scale();
-  noobject_scale_ = param.noobject_scale();
-  class_scale_ = param.class_scale();
-  coord_scale_ = param.coord_scale();
+  object_scale_ = param.object_scale(); // 相当于论文中loss第三行的系数
+  noobject_scale_ = param.noobject_scale();  // Rnoobj = 0.5
+  class_scale_ = param.class_scale();  // 相当于论文中loss第五行的系数
+  coord_scale_ = param.coord_scale();  // Rcoord = 5
   
   int input_count = bottom[0]->count(1);
   int label_count = bottom[1]->count(1);
@@ -77,21 +77,23 @@ void DetectionLossLayer<Dtype>::Forward_cpu(
   int locations = pow(side_, 2);
   caffe_set(diff_.count(), Dtype(0.), diff);
   for (int i = 0; i < bottom[0]->num(); ++i) {
-    int index = i * bottom[0]->count(1);
-    int true_index = i * bottom[1]->count(1);
+    int index = i * bottom[0]->count(1);  // index对应第i个样本数据的开始位置
+    int true_index = i * bottom[1]->count(1); //true_index对应第i个样本标签的开始位置
     for (int j = 0; j < locations; ++j) {
       for (int k = 0; k < num_object_; ++k) {
-        int p_index = index + num_class_ * locations + k * locations + j;
+        // 对于第i个样本数据,排列顺序为：num_class_xlocations(20x7x7) + num_object_xlocations(2x7x7) + locations*num_object_*4(7x7*2*4)
+        //                                7x7个cell的类别标签       7x7个cell每个boundbox的confidence    7x7个cell每个boundbox的坐标
+        int p_index = index + num_class_ * locations + k * locations + j;  //第j个cell第k个boundbox的confidence索引
         noobj_loss += noobject_scale_ * pow(input_data[p_index] - 0, 2);
         diff[p_index] = noobject_scale_ * (input_data[p_index] - 0);
         avg_no_obj += input_data[p_index];
       }
-      bool isobj = label_data[true_index + locations + j];
+      bool isobj = label_data[true_index + locations + j];  //对应(1 + 1 + 1 + 4)中的第2个标签
       if (!isobj) {
         continue;
       }
       obj_count += 1;
-      int label = static_cast<int>(label_data[true_index + locations * 2 + j]);
+      int label = static_cast<int>(label_data[true_index + locations * 2 + j]);  //对应(1 + 1 + 1 + 4)中的第3个标签
       CHECK_GE(label, 0) << "label start at 0";
       CHECK_LT(label, num_class_) << "label must below num_class";
       for (int c = 0; c < num_class_; ++c) {
